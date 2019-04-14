@@ -103,7 +103,7 @@ void calc_avg_altitude() {
     Serial.print(avg_altitude[readIndex]);
     Serial.println(" m");
 
-    if ((checkincreasing(sequentialReadings) == 1) && (g_cnt > warmLoops )){
+    if ((checkdecreasing(sequentialReadings) == 1) && (g_cnt > warmLoops )){
       Serial.println("PARASHUT!!!");
       while (1) {
         digitalWrite(ledSensorOK, HIGH);
@@ -130,7 +130,7 @@ long avg;
   return avg;
 }
 
-long checkincreasing(int delay_num) {
+long checkdecreasing(int delay_num) {
   int delta[delay_num];
   int Index = readIndex;
   int cnt_i;
