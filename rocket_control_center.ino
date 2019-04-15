@@ -31,25 +31,25 @@ const int ledSensorOK    = 3;
 const int ledSensorError = 2;
 
 // main loop delay
-const int MainLoopDelay=100; // delay in milliseconds in main loop, delay between actual sensor readings
-const int warmLoops=50;      // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
+const int MainLoopDelay=10; // delay in milliseconds in main loop, delay between actual sensor readings
+const int warmLoops=500;      // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
 
 //data structures for storing readings
-const int numReadings = 10;
-int readIndex = 0;              // the index of the current reading
+const int numReadings = 15;     // number of readings in a cyclic buffer
+int Index_calc = 0;              // the index of the current reading
 
-const int avgNum = 5;           // number of values to calc average
+const int avgNum = 5;           // number of values to calc average, avgNum*MainLoopDelay - interval of avg measurement in milliseconds
 //long pressure[avgNum];          // the readings from pressure sensor
 long altitude[avgNum];          // the readings from pressure sensor
-int  avg_readIndex = 0;
+int  Index_real = 0;
 
-//long avg_pressure[numReadings];    // average pressure readings
-long avg_altitude[numReadings];   // average altitude readings
+//long avg_pressure[numReadings];    // average pressure readings (cyclic buffer)
+long avg_altitude[numReadings];   // average altitude readings (cyclic buffer)
 
 //global loop conter
 long g_cnt = 0;
 
-const int sequentialReadings = 4; //number of sequential reading to analyze for making decision
+const int sequentialReadings = 15; //number of sequential reading to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
 
 
 void setup() {
@@ -82,25 +82,25 @@ void loop() {
 
 void savereadings() {
 
-  altitude[avg_readIndex] = bme.readAltitude(1013.25)*10; //bme.readPressure();
+  altitude[Index_real] = bme.readAltitude(1013.25)*10; //bme.readPressure();
 
   //Serial.println(g_cnt);
   //Serial.print(" Pressure = ");
-  //Serial.print(pressure[avg_readIndex]);
+  //Serial.print(pressure[Index_real]);
   //Serial.println(" Pa");
 
-  avg_readIndex = avg_readIndex + 1;
-  if (avg_readIndex >= avgNum) {
-    avg_readIndex = 0;
+  Index_real = Index_real + 1;
+  if (Index_real >= avgNum) {
+    Index_real = 0;
   }   
 }
 
 void calc_avg_altitude() {
   if (g_cnt % avgNum == 0) {
-    avg_altitude[readIndex] = get_avg();
+    avg_altitude[Index_calc] = get_avg();
 
     Serial.print(" AVG Altitude = ");
-    Serial.print(avg_altitude[readIndex]);
+    Serial.print(avg_altitude[Index_calc]);
     Serial.println(" m");
 
     if ((checkdecreasing(sequentialReadings) == 1) && (g_cnt > warmLoops )){
@@ -113,9 +113,9 @@ void calc_avg_altitude() {
       }      
     }
     
-    readIndex = readIndex + 1;
-    if (readIndex >= numReadings) {
-      readIndex = 0;
+    Index_calc = Index_calc + 1;
+    if (Index_calc >= numReadings) {
+      Index_calc = 0;
     }    
   }
 }
@@ -132,7 +132,7 @@ long avg;
 
 long checkdecreasing(int delay_num) {
   int delta[delay_num];
-  int Index = readIndex;
+  int Index = Index_calc;
   int cnt_i;
   int cnt_delta;
 
