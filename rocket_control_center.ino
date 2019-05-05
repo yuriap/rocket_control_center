@@ -1,9 +1,9 @@
 /*
  * 
  * 
- * 
- * VCC --------3.3V
- * GND ------- GND
+ * Barometer:
+ * VCC -------- 3.3V
+ * GND -------- GND
  * SCL -------- 13
  * SDA -------- 11
  * CSB -------- 10
@@ -11,83 +11,199 @@
  * Source https://arduino.ua/prod1758-barometr-datchik-atmosfernogo-davleniya-na-bmp280
  * 
  */
+
+/*
+ * EEPROM
+ * VCC -------- 5V
+ * GND -------- GND
+ * SCL -------- A5
+ * SDA -------- A4
+ *
+ * https://github.com/adamjezek98/Eeprom_at24c256
+ */
+
+/*
+ * ADXL345
+ * GND -------> GND
+ * VIN -------> +5v
+ * SDA -------> SDA (Analog 4 on "Classic Arduinos") -> 16
+ * SCL -------> SCL (Analog 5 on "Classic Arduinos") -> 17
+ * 
+ * https://learn.adafruit.com/adxl345-digital-accelerometer/assembly-and-wiring
+ */
+
+/*
+ * rele
+ * S ----------> 7
+ * 
+ * LEDs
+ * Writing started -> 2
+ * Sensors OK      -> 3
+ * Pressure Sensor Error -> 4
+ * Accell  Sensor Error  -> 5
+ */
+ 
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP280.h>
+#include <Adafruit_ADXL345_U.h>
+#include <MyEeprom_at24c256.h>
 
 #define BMP_SCK 13
 #define BMP_MISO 12
 #define BMP_MOSI 11 
 #define BMP_CS 10
 
+/* Assign a unique ID to this sensor at the same time */
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+
 //Adafruit_BMP280 bme; // I2C
 Adafruit_BMP280 bme(BMP_CS); // hardware SPI
-//Adafruit_BMP280 bme(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);
 
+//create eeprom at address 0x50
+MyEeprom_at24c256 eeprom(0x50);
 
 //pressure sensor status indicators
+const int ledWriting     = 2;
 const int ledSensorOK    = 3;
-const int ledSensorError = 2;
+const int ledPressureSensorError = 4;
+const int ledAccelSensorError = 5;
+
+//Rele
+const int pinRele        = 7;
 
 // main loop delay
-const int MainLoopDelay=10; // delay in milliseconds in main loop, delay between actual sensor readings
-const int warmLoops=500;      // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
+const int MainLoopDelay=50;       // delay in milliseconds in main loop, delay between actual sensor readings
+const int EEPROMWriteDelay=10;    // delay in milliseconds after eeprom write call
+const int warmLoops=500;          // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
 
 //data structures for storing readings
-const int numReadings = 15;     // number of readings in a cyclic buffer
-int Index_calc = 0;              // the index of the current reading
 
-const int avgNum = 5;           // number of values to calc average, avgNum*MainLoopDelay - interval of avg measurement in milliseconds
-//long pressure[avgNum];          // the readings from pressure sensor
-long altitude[avgNum];          // the readings from pressure sensor
-int  Index_real = 0;
+//Raw sensors data
+const int avgNum = 5;             // number of values to calc average, avgNum*MainLoopDelay - interval of avg measurement in milliseconds
+int  Index_real  = 0;             // index for real readings
 
-//long avg_pressure[numReadings];    // average pressure readings (cyclic buffer)
-long avg_altitude[numReadings];   // average altitude readings (cyclic buffer)
+long altitude[avgNum];            // the readings from altitude sensor
+long accel_x[avgNum];             // the readings from accelerpmeter X sensor
+long accel_y[avgNum];             // the readings from accelerpmeter Y sensor
+long accel_z[avgNum];             // the readings from accelerpmeter Z sensor
+
+//Averaged sensors data
+const int numReadings = 15;       // number of readings in a cyclic buffer
+int   Index_avg = 0;              // the index of the averaged reading
+long  avg_altitude[numReadings];  // average altitude readings
+long  avg_accel_x[avgNum];        // average readings from accelerpmeter X sensor
+long  avg_accel_y[avgNum];        // average readings from accelerpmeter Y sensor
+long  avg_accel_z[avgNum];        // average readings from accelerpmeter Z sensor
+
+const int coeff = 1000;           //reading stored precision
 
 //global loop conter
 long g_cnt = 0;
 
-const int sequentialReadings = 15; //number of sequential reading to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
+//number of sequential reading to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
+const int sequentialReadings = 15; 
 
 
 void setup() {
-  pinMode(ledSensorOK, OUTPUT);
-  pinMode(ledSensorError, OUTPUT);
   
   Serial.begin(9600);
-  Serial.println(F("BMP280 test"));
+  
+  /****************************************************/
+  pinMode(ledSensorOK,    OUTPUT);
+  pinMode(ledPressureSensorError, OUTPUT);
+  pinMode(ledAccelSensorError, OUTPUT);
+  
+  pinMode(ledWriting,     OUTPUT);
+  
+  digitalWrite(ledSensorOK, HIGH);
+  digitalWrite(ledPressureSensorError, HIGH);
+  digitalWrite(ledAccelSensorError, HIGH);
+  digitalWrite(ledWriting, HIGH);
+  
+  /****************************************************/
+  pinMode(pinRele, OUTPUT);
+  digitalWrite(pinRele, LOW);
+  
+  /****************************************************/
+  /* Initialise the sensor */
+  Serial.println(F("Accelerometer test..."));
+  if(!accel.begin())
+  {
+    /* There was a problem detecting the ADXL345 ... check your connections */
+    Serial.println("Ooops, no ADXL345 detected ... Check your wiring!");
+    while (1) {
+      digitalWrite(ledAccelSensorError, HIGH);
+      delay(200);                       
+      digitalWrite(ledAccelSensorError, LOW);
+      delay(200);     
+    }
+  }
+
+  /* Set the range to whatever is appropriate for your project */
+  accel.setRange(ADXL345_RANGE_16_G);
+  Serial.println(F("Accelerometer test OK"));
+  
+  /****************************************************/
+  Serial.println(F("Pressure BMP280 test..."));
   
   if (!bme.begin()) {
     Serial.println("Could not find a valid BMP280 sensor, check wiring!");
     while (1) {
-      digitalWrite(ledSensorError, HIGH);
+      digitalWrite(ledPressureSensorError, HIGH);
       delay(200);                       
-      digitalWrite(ledSensorError, LOW);
+      digitalWrite(ledPressureSensorError, LOW);
       delay(200);     
     }
   }
-  digitalWrite(ledSensorOK, HIGH);
+  Serial.println(F("Pressure BMP280 test OK"));
+  
+  /****************************************************/
+  digitalWrite(ledSensorOK, LOW);
 }
 
 void loop() {
-  g_cnt++;
+   
+  int write_delay = 0;
+  
+  readsensors();
+ 
+  if (g_cnt % avgNum == 0) {
+ 
+    int curr_idx = calc_averages();
+    
+    if (g_cnt > warmLoops) {
+      if ((g_cnt - warmLoops) < 2047) {
+        eeprom.write4longs((g_cnt - warmLoops - 1) * 16, avg_altitude[curr_idx] * coeff, avg_accel_x[curr_idx] * coeff, avg_accel_y[curr_idx] * coeff, avg_accel_z[curr_idx] * coeff);
+        write_delay = EEPROMWriteDelay;
+        digitalWrite(ledWriting, LOW);
+      }
+      else
+      {
+        digitalWrite(ledWriting, HIGH);
+      }
+      
+      if (checkdecreasing(sequentialReadings) == 1){
+        digitalWrite(pinRele, HIGH);    
+      }      
+    }  
 
-  savereadings();
-  calc_avg_altitude();
-
-  delay(MainLoopDelay);
+  }
+ 
+  delay(MainLoopDelay-write_delay);
+  g_cnt = g_cnt + 1;   
 }
 
-void savereadings() {
+void readsensors() {
 
-  altitude[Index_real] = bme.readAltitude(1013.25)*10; //bme.readPressure();
-
-  //Serial.println(g_cnt);
-  //Serial.print(" Pressure = ");
-  //Serial.print(pressure[Index_real]);
-  //Serial.println(" Pa");
+  altitude[Index_real] = bme.readAltitude(1013.25)*10; 
+  
+  sensors_event_t event; 
+  accel.getEvent(&event);
+  accel_x[Index_real] = event.acceleration.x;
+  accel_y[Index_real] = event.acceleration.y;
+  accel_z[Index_real] = event.acceleration.z;
 
   Index_real = Index_real + 1;
   if (Index_real >= avgNum) {
@@ -95,36 +211,30 @@ void savereadings() {
   }   
 }
 
-void calc_avg_altitude() {
-  if (g_cnt % avgNum == 0) {
-    avg_altitude[Index_calc] = get_avg();
-
-    Serial.print(" AVG Altitude = ");
-    Serial.print(avg_altitude[Index_calc]);
-    Serial.println(" m");
-
-    if ((checkdecreasing(sequentialReadings) == 1) && (g_cnt > warmLoops )){
-      Serial.println("PARASHUT!!!");
-      while (1) {
-        digitalWrite(ledSensorOK, HIGH);
-        delay(200);                       
-        digitalWrite(ledSensorOK, LOW);
-        delay(200);     
-      }      
-    }
-    
-    Index_calc = Index_calc + 1;
-    if (Index_calc >= numReadings) {
-      Index_calc = 0;
-    }    
+int calc_averages() {
+Serial.println("g_cnt2: " + String(g_cnt));    
+  int curr_idx = Index_avg;
+  avg_altitude[Index_avg] = getavgreadings(altitude);//get_avg();
+Serial.println("avg_altitude[Index_avg]: " + String(avg_altitude[Index_avg]));
+  avg_accel_x[Index_avg]  = getavgreadings(accel_x);
+Serial.println("avg_accel_x[Index_avg]: " + String(avg_accel_x[Index_avg]));  
+  avg_accel_y[Index_avg]  = getavgreadings(accel_y);
+Serial.println("avg_accel_y[Index_avg]: " + String(avg_accel_y[Index_avg]));
+  avg_accel_z[Index_avg]  = getavgreadings(accel_z);
+Serial.println("avg_accel_z[Index_avg]: " + String(avg_accel_z[Index_avg]));
+Serial.println("g_cnt3: " + String(g_cnt));     
+  Index_avg = Index_avg + 1;
+  if (Index_avg >= numReadings) {
+    Index_avg = 0;
   }
+  return curr_idx;
 }
 
-long get_avg() {
-long avg;
+long getavgreadings(long data[avgNum]) {
+  long avg;
   avg = 0;
   for (int i = 0; i < avgNum; i++) {
-    avg = avg + altitude[i];
+    avg = avg + data[i];
   }
   avg = avg / avgNum;
   return avg;
@@ -132,7 +242,7 @@ long avg;
 
 long checkdecreasing(int delay_num) {
   int delta[delay_num];
-  int Index = Index_calc;
+  int Index = Index_avg;
   int cnt_i;
   int cnt_delta;
 
