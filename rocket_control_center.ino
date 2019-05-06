@@ -33,7 +33,7 @@
  */
 
 /*
- * rele
+ * Relay
  * S ----------> 7
  * 
  * LEDs
@@ -71,10 +71,10 @@ const int ledPressureSensorError = 4;
 const int ledAccelSensorError = 5;
 
 //Rele
-const int pinRele        = 7;
+const int pinRelay       = 7;
 
 // main loop delay
-const int MainLoopDelay=50;       // delay in milliseconds in main loop, delay between actual sensor readings
+const int MainLoopDelay=10;       // delay in milliseconds in main loop, delay between actual sensor readings
 const int EEPROMWriteDelay=10;    // delay in milliseconds after eeprom write call
 const int warmLoops=500;          // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
 
@@ -93,14 +93,15 @@ long accel_z[avgNum];             // the readings from accelerpmeter Z sensor
 const int numReadings = 15;       // number of readings in a cyclic buffer
 int   Index_avg = 0;              // the index of the averaged reading
 long  avg_altitude[numReadings];  // average altitude readings
-long  avg_accel_x[avgNum];        // average readings from accelerpmeter X sensor
-long  avg_accel_y[avgNum];        // average readings from accelerpmeter Y sensor
-long  avg_accel_z[avgNum];        // average readings from accelerpmeter Z sensor
+long  avg_accel_x[numReadings];        // average readings from accelerpmeter X sensor
+long  avg_accel_y[numReadings];        // average readings from accelerpmeter Y sensor
+long  avg_accel_z[numReadings];        // average readings from accelerpmeter Z sensor
 
 const int coeff = 1000;           //reading stored precision
 
 //global loop conter
 long g_cnt = 0;
+long addr  = 0;
 
 //number of sequential reading to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
 const int sequentialReadings = 15; 
@@ -123,8 +124,8 @@ void setup() {
   digitalWrite(ledWriting, HIGH);
   
   /****************************************************/
-  pinMode(pinRele, OUTPUT);
-  digitalWrite(pinRele, LOW);
+  pinMode(pinRelay, OUTPUT);
+  digitalWrite(pinRelay, LOW);
   
   /****************************************************/
   /* Initialise the sensor */
@@ -168,24 +169,34 @@ void loop() {
   int write_delay = 0;
   
   readsensors();
- 
+ //Serial.println("g_cnt: " + String(g_cnt));  
   if (g_cnt % avgNum == 0) {
  
     int curr_idx = calc_averages();
     
     if (g_cnt > warmLoops) {
-      if ((g_cnt - warmLoops) < 2047) {
-        eeprom.write4longs((g_cnt - warmLoops - 1) * 16, avg_altitude[curr_idx] * coeff, avg_accel_x[curr_idx] * coeff, avg_accel_y[curr_idx] * coeff, avg_accel_z[curr_idx] * coeff);
-        write_delay = EEPROMWriteDelay;
+      if (addr < 200) {
         digitalWrite(ledWriting, LOW);
+        eeprom.write4longs(addr * 16, avg_altitude[curr_idx], avg_accel_x[curr_idx], avg_accel_y[curr_idx], avg_accel_z[curr_idx]);
+        //Serial.println("written["+String((addr * 16))+"]: " + String(avg_altitude[curr_idx])+" "+String(avg_accel_x[curr_idx])+" "+String(avg_accel_y[curr_idx])+" "+String(avg_accel_z[curr_idx]));
+        write_delay = EEPROMWriteDelay;
+        addr = addr + 1;
       }
       else
       {
-        digitalWrite(ledWriting, HIGH);
+        while (1) {
+          digitalWrite(ledWriting, HIGH);
+          delay(200);                       
+          digitalWrite(ledWriting, LOW);
+          delay(200);    
+        }
       }
       
       if (checkdecreasing(sequentialReadings) == 1){
-        digitalWrite(pinRele, HIGH);    
+        digitalWrite(pinRelay, HIGH);    
+        digitalWrite(ledSensorOK, LOW);                  
+        digitalWrite(ledPressureSensorError, LOW);
+        digitalWrite(ledAccelSensorError, LOW);        
       }      
     }  
 
@@ -197,13 +208,13 @@ void loop() {
 
 void readsensors() {
 
-  altitude[Index_real] = bme.readAltitude(1013.25)*10; 
+  altitude[Index_real] = bme.readAltitude(1013.25) * 10 * coeff; 
   
   sensors_event_t event; 
   accel.getEvent(&event);
-  accel_x[Index_real] = event.acceleration.x;
-  accel_y[Index_real] = event.acceleration.y;
-  accel_z[Index_real] = event.acceleration.z;
+  accel_x[Index_real] = event.acceleration.x * coeff;
+  accel_y[Index_real] = event.acceleration.y * coeff;
+  accel_z[Index_real] = event.acceleration.z * coeff;
 
   Index_real = Index_real + 1;
   if (Index_real >= avgNum) {
@@ -212,17 +223,11 @@ void readsensors() {
 }
 
 int calc_averages() {
-Serial.println("g_cnt2: " + String(g_cnt));    
   int curr_idx = Index_avg;
   avg_altitude[Index_avg] = getavgreadings(altitude);//get_avg();
-Serial.println("avg_altitude[Index_avg]: " + String(avg_altitude[Index_avg]));
-  avg_accel_x[Index_avg]  = getavgreadings(accel_x);
-Serial.println("avg_accel_x[Index_avg]: " + String(avg_accel_x[Index_avg]));  
+  avg_accel_x[Index_avg]  = getavgreadings(accel_x); 
   avg_accel_y[Index_avg]  = getavgreadings(accel_y);
-Serial.println("avg_accel_y[Index_avg]: " + String(avg_accel_y[Index_avg]));
-  avg_accel_z[Index_avg]  = getavgreadings(accel_z);
-Serial.println("avg_accel_z[Index_avg]: " + String(avg_accel_z[Index_avg]));
-Serial.println("g_cnt3: " + String(g_cnt));     
+  avg_accel_z[Index_avg]  = getavgreadings(accel_z);  
   Index_avg = Index_avg + 1;
   if (Index_avg >= numReadings) {
     Index_avg = 0;
