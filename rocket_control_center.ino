@@ -112,7 +112,7 @@ long g_cnt = 0;
 long addr  = 0;
 
 //number of sequential readings to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
-const int sequentialReadings = numReadings; 
+const int sequentialReadings = numReadings - 1; 
 
 int flag_relay_on = 0;
 
@@ -294,7 +294,6 @@ long checkdecreasing(int delay_num) {
 
   //if 2/3 of readings of a sample (delay_num) are decreasing it means readings are steadily decreasing
   if (cnt_delta*3 > delay_num*2) {
-    //Serial.println("checkdecreasing: " + String(cnt_delta)+" "+String(delay_num/2));
     return 1;
   }
   else {
