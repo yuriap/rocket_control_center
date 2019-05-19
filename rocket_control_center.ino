@@ -74,9 +74,17 @@ const int ledAccelSensorError = 5;
 const int pinRelay       = 7;
 
 // main loop delay
-const int MainLoopDelay=10;       // delay in milliseconds in main loop, delay between actual sensor readings
-const int EEPROMWriteDelay=10;    // delay in milliseconds after eeprom write call
-const int warmLoops=500;          // number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
+const int MainLoopDelay    = 10;  // delay in milliseconds in main loop, delay between actual sensor readings
+const int EEPROMWriteDelay = 10;  // delay in milliseconds after eeprom write call
+const int warmLoops        = 1000;// number of loops the readings of altitude will be ignored (warmLoops*MainLoopDelay/1000 seconds)
+
+//Rocket
+//MainLoopDelay = 10;
+//warmLoops     = 1000;
+
+//Lift testing
+//MainLoopDelay = 50;
+//warmLoops     = 200;
 
 //data structures for storing readings
 
@@ -90,7 +98,7 @@ long accel_y[avgNum];             // the readings from accelerpmeter Y sensor
 long accel_z[avgNum];             // the readings from accelerpmeter Z sensor
 
 //Averaged sensors data
-const int numReadings = 15;       // number of readings in a cyclic buffer
+const int numReadings = 16;       // number of readings in a cyclic buffer
 int   Index_avg = 0;              // the index of the averaged reading
 long  avg_altitude[numReadings];  // average altitude readings
 long  avg_accel_x[numReadings];        // average readings from accelerpmeter X sensor
@@ -103,9 +111,10 @@ const int coeff = 1000;           //reading stored precision
 long g_cnt = 0;
 long addr  = 0;
 
-//number of sequential reading to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
-const int sequentialReadings = 15; 
+//number of sequential readings to analyze for making decision, sequentialReadings*avgNum*MainLoopDelay - minimal time duration after the apogee after which the decision can be made 
+const int sequentialReadings = numReadings; 
 
+int flag_relay_on = 0;
 
 void setup() {
   
@@ -175,8 +184,13 @@ void loop() {
     int curr_idx = calc_averages();
     
     if (g_cnt > warmLoops) {
-      if (addr < 200) {
+      if (addr < 2047) {
         digitalWrite(ledWriting, LOW);
+        if (flag_relay_on == 1) {
+          eeprom.write4longs(addr * 16, 0, 0, 0, 0);
+          addr = addr + 1;
+          flag_relay_on = 2;
+        }
         eeprom.write4longs(addr * 16, avg_altitude[curr_idx], avg_accel_x[curr_idx], avg_accel_y[curr_idx], avg_accel_z[curr_idx]);
         //Serial.println("written["+String((addr * 16))+"]: " + String(avg_altitude[curr_idx])+" "+String(avg_accel_x[curr_idx])+" "+String(avg_accel_y[curr_idx])+" "+String(avg_accel_z[curr_idx]));
         write_delay = EEPROMWriteDelay;
@@ -193,6 +207,9 @@ void loop() {
       }
       
       if (checkdecreasing(sequentialReadings) == 1){
+        if (flag_relay_on == 0) {
+          flag_relay_on = 1;
+        }
         digitalWrite(pinRelay, HIGH);    
         digitalWrite(ledSensorOK, LOW);                  
         digitalWrite(ledPressureSensorError, LOW);
@@ -246,20 +263,20 @@ long getavgreadings(long data[avgNum]) {
 }
 
 long checkdecreasing(int delay_num) {
-  int delta[delay_num];
+  long delta[delay_num];
   int Index = Index_avg;
   int cnt_i;
-  int cnt_delta;
+  long cnt_delta;
 
   //fill an array with delta of reading values
   cnt_i = 0;
   while (cnt_i < delay_num) {  
     if (Index > 0) {
-      delta[cnt_i] = avg_altitude[Index] - avg_altitude[Index-1];
+      delta[cnt_i] = (avg_altitude[Index] - avg_altitude[Index-1])/coeff;
       Index = Index - 1;
     }
     else {
-      delta[cnt_i] = avg_altitude[Index] - avg_altitude[numReadings-1];
+      delta[cnt_i] = (avg_altitude[Index] - avg_altitude[numReadings-1])/coeff;
       Index = numReadings-1;
     }
     cnt_i = cnt_i + 1;    
@@ -275,8 +292,9 @@ long checkdecreasing(int delay_num) {
     cnt_i = cnt_i + 1;    
   } 
 
-  //if number of decreased reading equal to delay_num it means readings are steadily decreasing
-  if (cnt_delta == delay_num) {
+  //if 2/3 of readings of a sample (delay_num) are decreasing it means readings are steadily decreasing
+  if (cnt_delta*3 > delay_num*2) {
+    //Serial.println("checkdecreasing: " + String(cnt_delta)+" "+String(delay_num/2));
     return 1;
   }
   else {
