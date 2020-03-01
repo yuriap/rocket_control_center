@@ -115,28 +115,31 @@ long addr  = 0;
 const int sequentialReadings = numReadings - 1; 
 
 int flag_relay_on = 0;
-
+long start_relay   = 1;
+long relay_duration = 120;
+  
 void setup() {
   
   Serial.begin(9600);
   
   /****************************************************/
-  pinMode(ledSensorOK,    OUTPUT);
-  pinMode(ledPressureSensorError, OUTPUT);
-  pinMode(ledAccelSensorError, OUTPUT);
-  
-  pinMode(ledWriting,     OUTPUT);
-  
-  digitalWrite(ledSensorOK, HIGH);
-  digitalWrite(ledPressureSensorError, HIGH);
-  digitalWrite(ledAccelSensorError, HIGH);
-  digitalWrite(ledWriting, HIGH);
-  
+  Serial.println(F("start sequense 1: init LEDs"));
+  pinMode(ledSensorOK,    OUTPUT);        digitalWrite(ledSensorOK, HIGH);delay(500);digitalWrite(ledSensorOK, LOW);
+  pinMode(ledPressureSensorError, OUTPUT);digitalWrite(ledPressureSensorError, HIGH);delay(500);digitalWrite(ledPressureSensorError, LOW);
+  pinMode(ledAccelSensorError, OUTPUT);   digitalWrite(ledAccelSensorError, HIGH);delay(500);digitalWrite(ledAccelSensorError, LOW);
+  pinMode(ledWriting,     OUTPUT);        digitalWrite(ledWriting, HIGH);delay(500);digitalWrite(ledWriting, LOW);
+
+  delay(1000);
+  Serial.println(F("start sequense 2: init Relay"));
+
   /****************************************************/
   pinMode(pinRelay, OUTPUT);
   digitalWrite(pinRelay, LOW);
   
   /****************************************************/
+  delay(1000);
+  Serial.println(F("start sequense 3: init Accelerometer"));
+    
   /* Initialise the sensor */
   Serial.println(F("Accelerometer test..."));
   if(!accel.begin())
@@ -151,6 +154,9 @@ void setup() {
     }
   }
 
+  delay(1000);
+  Serial.println(F("start sequense 4: init Pressure meter"));
+  
   /* Set the range to whatever is appropriate for your project */
   accel.setRange(ADXL345_RANGE_16_G);
   Serial.println(F("Accelerometer test OK"));
@@ -170,22 +176,24 @@ void setup() {
   Serial.println(F("Pressure BMP280 test OK"));
   
   /****************************************************/
-  digitalWrite(ledSensorOK, LOW);
+  digitalWrite(ledSensorOK, HIGH);
 }
 
 void loop() {
-   
   int write_delay = 0;
   
   readsensors();
- //Serial.println("g_cnt: " + String(g_cnt));  
+  //Serial.println("g_cnt: " + String(g_cnt));  
   if (g_cnt % avgNum == 0) {
  
     int curr_idx = calc_averages();
     
     if (g_cnt > warmLoops) {
       if (addr < 2047) {
-        digitalWrite(ledWriting, LOW);
+        digitalWrite(ledWriting, HIGH);digitalWrite(ledSensorOK, LOW);
+        if (g_cnt % 50 == 0){
+          Serial.println("Writing: addr: " + String(addr) + "; g_cnt: " + String(g_cnt)); 
+        }
         if (flag_relay_on == 1) {
           eeprom.write4longs(addr * 16, 0, 0, 0, 0);
           addr = addr + 1;
@@ -198,6 +206,7 @@ void loop() {
       }
       else
       {
+        Serial.println("Writing finished: g_cnt: " + String(g_cnt)); 
         while (1) {
           digitalWrite(ledWriting, HIGH);
           delay(200);                       
@@ -206,16 +215,32 @@ void loop() {
         }
       }
       
-      if (checkdecreasing(sequentialReadings) == 1){
+      //if ((checkdecreasing(sequentialReadings) == 1)&&(start_relay == 1)){
+      if ((g_cnt > warmLoops + 1000)&&(start_relay == 1)){
         if (flag_relay_on == 0) {
           flag_relay_on = 1;
+        }
+        if (start_relay == 1){
+          start_relay = g_cnt;
+          Serial.println("Relay ON: g_cnt: " + String(g_cnt) + "; start_relay: " + String(start_relay)); 
         }
         digitalWrite(pinRelay, HIGH);    
         digitalWrite(ledSensorOK, LOW);                  
         digitalWrite(ledPressureSensorError, LOW);
         digitalWrite(ledAccelSensorError, LOW);        
-      }      
+      }
+      if ((start_relay>1)&&(g_cnt > start_relay + relay_duration )){
+        digitalWrite(pinRelay, LOW); 
+        Serial.println("Relay OFF: g_cnt: " + String(g_cnt) + "; start_relay: " + String(start_relay)); 
+        start_relay = 0;
+      }
     }  
+    else
+    {
+      if (g_cnt % 50 == 0){
+        Serial.println("Warm loops: g_cnt: " + String(g_cnt)); 
+      }
+    }
 
   }
  
